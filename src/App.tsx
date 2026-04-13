@@ -320,6 +320,7 @@ export default function App() {
                 <Route path="/master/profile" element={<ManageProfile masterInfo={masterInfo} />} />
                 <Route path="/master/news" element={<ManageNews news={news} />} />
                 <Route path="/master/portfolio" element={<ManagePortfolio portfolio={portfolio} />} />
+                <Route path="/master/reviews" element={<ManageReviews reviews={reviews} />} />
               </>
             )}
           </Routes>
@@ -597,14 +598,15 @@ function Booking({ services, clientId, tgUser, masterInfo }: { services: Service
         createdAt: new Date().toISOString()
       };
 
-      await addDoc(collection(db, 'appointments'), newAppointment);
+      const docRef = await addDoc(collection(db, 'appointments'), newAppointment);
 
       // Notify master via API
       fetch('/api/notify-master', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          appointment: newAppointment
+          appointment: { ...newAppointment, id: docRef.id },
+          type: 'new'
         })
       });
 
@@ -1115,8 +1117,18 @@ function ManageServices({ services }: { services: Service[] }) {
 }
 
 function ManageAppointments({ appointments }: { appointments: Appointment[] }) {
-  const handleStatus = async (id: string, status: Appointment['status']) => {
-    await updateDoc(doc(db, 'appointments', id), { status });
+  const handleStatus = async (app: Appointment, status: Appointment['status']) => {
+    await updateDoc(doc(db, 'appointments', app.id), { status });
+    
+    // Notify client via API
+    fetch('/api/notify-client', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        appointment: app,
+        status: status
+      })
+    });
   };
 
   return (
@@ -1155,16 +1167,16 @@ function ManageAppointments({ appointments }: { appointments: Appointment[] }) {
             <div className="flex gap-2 pt-2">
               {app.status === 'pending' && (
                 <>
-                  <Button className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600" onClick={() => handleStatus(app.id, 'confirmed')}>
+                  <Button className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600" onClick={() => handleStatus(app, 'confirmed')}>
                     <CheckCircle2 size={16} /> Принять
                   </Button>
-                  <Button className="flex-1 py-3 bg-rose-500 hover:bg-rose-600" onClick={() => handleStatus(app.id, 'rejected')}>
+                  <Button className="flex-1 py-3 bg-rose-500 hover:bg-rose-600" onClick={() => handleStatus(app, 'rejected')}>
                     <XCircle size={16} /> Отказать
                   </Button>
                 </>
               )}
               {app.status !== 'pending' && (
-                <Button variant="outline" className="w-full py-3" onClick={() => handleStatus(app.id, 'pending')}>
+                <Button variant="outline" className="w-full py-3" onClick={() => handleStatus(app, 'pending')}>
                   Вернуть в ожидание
                 </Button>
               )}
@@ -1230,6 +1242,12 @@ function ManageProfile({ masterInfo }: { masterInfo: MasterInfo | null }) {
             <span className="text-xs font-bold uppercase tracking-widest">Портфолио</span>
           </Card>
         </Link>
+        <Link to="/master/reviews" className="block col-span-2">
+          <Card className="text-center p-6 hover:bg-[#e89a9a]/5 transition-colors">
+            <Star size={32} className="mx-auto mb-2 text-[#e89a9a]" />
+            <span className="text-xs font-bold uppercase tracking-widest">Управление отзывами</span>
+          </Card>
+        </Link>
       </div>
     </div>
   );
@@ -1292,6 +1310,20 @@ function ManageNews({ news }: { news: News[] }) {
 
 function ManagePortfolio({ portfolio }: { portfolio: Portfolio[] }) {
   const [editing, setEditing] = useState<Partial<Portfolio> | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUploading(true);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setEditing(prev => ({ ...prev, imageUrl: reader.result as string }));
+        setUploading(false);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleSave = async () => {
     if (!editing?.imageUrl) return;
@@ -1314,11 +1346,31 @@ function ManagePortfolio({ portfolio }: { portfolio: Portfolio[] }) {
 
       {editing && (
         <Card className="space-y-4">
-          <input placeholder="URL Картинки" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.imageUrl || ''} onChange={e => setEditing({...editing, imageUrl: e.target.value})} />
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-2">Загрузить фото</label>
+            <div className="relative h-48 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center overflow-hidden">
+              {editing.imageUrl ? (
+                <img src={editing.imageUrl} className="w-full h-full object-cover" alt="Preview" />
+              ) : (
+                <div className="text-center p-4">
+                  <ImageIcon size={32} className="mx-auto mb-2 text-slate-300" />
+                  <p className="text-[10px] text-slate-400 font-bold uppercase">Нажмите для выбора файла</p>
+                </div>
+              )}
+              <input 
+                type="file" 
+                accept="image/*" 
+                className="absolute inset-0 opacity-0 cursor-pointer" 
+                onChange={handleFileChange}
+              />
+            </div>
+            {uploading && <p className="text-[10px] text-[#e89a9a] font-bold animate-pulse text-center">Обработка...</p>}
+          </div>
+          
           <input placeholder="Название (необяз.)" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.title || ''} onChange={e => setEditing({...editing, title: e.target.value})} />
           <div className="flex gap-3">
             <Button variant="secondary" className="flex-1" onClick={() => setEditing(null)}>Отмена</Button>
-            <Button className="flex-1" onClick={handleSave}>Добавить</Button>
+            <Button className="flex-1" disabled={!editing.imageUrl || uploading} onClick={handleSave}>Добавить</Button>
           </div>
         </Card>
       )}
@@ -1332,6 +1384,71 @@ function ManagePortfolio({ portfolio }: { portfolio: Portfolio[] }) {
               <button onClick={() => deleteDoc(doc(db, 'portfolio', item.id))} className="bg-white/90 p-2 rounded-full text-rose-500 shadow-sm"><Trash2 size={14} /></button>
             </div>
           </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ManageReviews({ reviews }: { reviews: Review[] }) {
+  const [editing, setEditing] = useState<Partial<Review> | null>(null);
+
+  const handleSave = async () => {
+    if (!editing?.comment || !editing?.rating || !editing.id) return;
+    await updateDoc(doc(db, 'reviews', editing.id), {
+      comment: editing.comment,
+      rating: editing.rating
+    });
+    setEditing(null);
+  };
+
+  return (
+    <div className="space-y-8">
+      <SectionTitle title="Отзывы" subtitle="Управление" />
+
+      {editing && (
+        <Card className="space-y-4 border-[#e89a9a]/30">
+          <div className="flex justify-center gap-2">
+            {[1, 2, 3, 4, 5].map(i => (
+              <Star 
+                key={i} 
+                size={24} 
+                className={cn("cursor-pointer", i <= (editing.rating || 0) ? "fill-yellow-400 text-yellow-400" : "text-slate-200")} 
+                onClick={() => setEditing({...editing, rating: i})}
+              />
+            ))}
+          </div>
+          <textarea 
+            className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none h-32" 
+            value={editing.comment || ''} 
+            onChange={e => setEditing({...editing, comment: e.target.value})} 
+          />
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setEditing(null)}>Отмена</Button>
+            <Button className="flex-1" onClick={handleSave}>Сохранить</Button>
+          </div>
+        </Card>
+      )}
+
+      <div className="space-y-4">
+        {reviews.map(review => (
+          <Card key={review.id} className="space-y-3">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <span className="font-bold text-sm">{review.clientName}</span>
+                <div className="flex gap-0.5">
+                  {[...Array(5)].map((_, i) => (
+                    <Star key={i} size={10} className={cn(i < review.rating ? "fill-yellow-400 text-yellow-400" : "text-slate-200")} />
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setEditing(review)} className="text-slate-300 hover:text-[#e89a9a]"><Edit2 size={16} /></button>
+                <button onClick={() => deleteDoc(doc(db, 'reviews', review.id))} className="text-slate-300 hover:text-rose-500"><Trash2 size={16} /></button>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 italic">"{review.comment}"</p>
+          </Card>
         ))}
       </div>
     </div>

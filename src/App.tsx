@@ -1,30 +1,60 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Calendar, Clock, User, Star, Plus, Trash2, Edit2, ChevronRight, 
-  CheckCircle2, XCircle, AlertCircle, Menu, X, Phone, MessageSquare, 
-  Home, Settings, ClipboardList, Info, Image as ImageIcon, Newspaper, 
-  ArrowRight, Heart, Share2, MapPin, LogIn, PlusCircle, CalendarDays,
-  ChevronLeft, LayoutDashboard
+  Calendar, 
+  Clock, 
+  User, 
+  Star, 
+  Plus, 
+  Trash2, 
+  Edit2, 
+  ChevronRight, 
+  CheckCircle2, 
+  XCircle, 
+  AlertCircle,
+  Menu,
+  X,
+  Phone,
+  MessageSquare,
+  Home,
+  Settings,
+  ClipboardList,
+  Info,
+  Image as ImageIcon,
+  Newspaper,
+  ArrowRight,
+  Heart,
+  Share2,
+  MapPin
 } from 'lucide-react';
-import { format, addDays, isSameDay, parseISO } from 'date-fns';
+import { format, addDays, startOfDay, isSameDay, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { 
-  collection, addDoc, getDocs, query, where, onSnapshot, doc, 
-  updateDoc, deleteDoc, setDoc, getDoc, orderBy, limit
+  collection, 
+  addDoc, 
+  getDocs, 
+  query, 
+  where, 
+  onSnapshot, 
+  doc, 
+  updateDoc, 
+  deleteDoc, 
+  setDoc, 
+  getDoc,
+  orderBy,
+  limit
 } from 'firebase/firestore';
-import { signInAnonymously, onAuthStateChanged, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { db, auth } from './firebase';
+import { db } from './firebase';
 import { cn } from './lib/utils';
 
 // --- Types ---
 interface Service {
   id: string;
   name: string;
-  shortDescription: string;
-  fullDescription: string;
+  description: string;
   price: number;
+  priceRange: string;
   duration: number;
 }
 
@@ -32,19 +62,49 @@ interface Appointment {
   id: string;
   clientId: string;
   clientName: string;
-  clientPhone: string;
-  clientComment?: string;
+  clientPhone?: string;
   serviceId: string;
   serviceName: string;
   date: string;
-  time: string;
   status: 'pending' | 'confirmed' | 'cancelled' | 'rejected';
+  price?: number;
+  notes?: string;
   createdAt: string;
 }
 
-interface Availability {
+interface Review {
   id: string;
-  slots: string[];
+  clientId: string;
+  clientName: string;
+  rating: number;
+  comment: string;
+  date: string;
+}
+
+interface MasterInfo {
+  name: string;
+  bio: string;
+  experience: string;
+  photoUrl: string;
+  phone?: string;
+  telegram?: string;
+}
+
+interface News {
+  id: string;
+  title: string;
+  content: string;
+  imageUrl?: string;
+  date: string;
+  active: boolean;
+}
+
+interface Portfolio {
+  id: string;
+  imageUrl: string;
+  title?: string;
+  category?: string;
+  date: string;
 }
 
 // --- Components ---
@@ -60,18 +120,36 @@ const Card = ({ children, className, onClick }: { children: React.ReactNode; cla
   </motion.div>
 );
 
-const Button = ({ children, onClick, variant = 'primary', className, disabled }: any) => {
-  const variants: any = {
+const Button = ({ 
+  children, 
+  onClick, 
+  variant = 'primary', 
+  className,
+  disabled
+}: { 
+  children: React.ReactNode; 
+  onClick?: () => void; 
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost';
+  className?: string;
+  disabled?: boolean;
+}) => {
+  const variants = {
     primary: "bg-[#e89a9a] text-white shadow-lg shadow-[#e89a9a]/20 hover:bg-[#d88a8a]",
     secondary: "bg-[#f5f2ed] text-[#2d2424] hover:bg-[#ebe8e3]",
     outline: "border-2 border-[#e89a9a] text-[#e89a9a] hover:bg-[#e89a9a]/5",
+    ghost: "text-slate-400 hover:text-pink-500"
   };
+
   return (
     <motion.button
       whileTap={{ scale: 0.95 }}
       onClick={onClick}
       disabled={disabled}
-      className={cn("px-6 py-4 rounded-2xl font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-2", variants[variant], className)}
+      className={cn(
+        "px-6 py-4 rounded-2xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2",
+        variants[variant],
+        className
+      )}
     >
       {children}
     </motion.button>
@@ -85,12 +163,14 @@ const Badge = ({ status }: { status: Appointment['status'] }) => {
     cancelled: "bg-rose-50 text-rose-600 border-rose-100",
     rejected: "bg-slate-50 text-slate-500 border-slate-100"
   };
+
   const labels = {
-    pending: "Новая",
-    confirmed: "Ок",
-    cancelled: "Отмена",
-    rejected: "Отказ"
+    pending: "В ожидании",
+    confirmed: "Записано",
+    cancelled: "Отменено",
+    rejected: "Не получится"
   };
+
   return (
     <span className={cn("px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border", styles[status])}>
       {labels[status]}
@@ -98,512 +178,1162 @@ const Badge = ({ status }: { status: Appointment['status'] }) => {
   );
 };
 
-const SectionTitle = ({ title, subtitle, backTo }: { title: string; subtitle?: string; backTo?: string }) => {
-  const navigate = useNavigate();
-  return (
-    <div className="flex justify-between items-end mb-8 px-2">
-      <div className="flex items-center gap-4">
-        {backTo && (
-          <button onClick={() => navigate(backTo)} className="p-2 bg-white rounded-full shadow-sm border border-[#f5f2ed]">
-            <ChevronLeft size={20} />
-          </button>
-        )}
-        <div>
-          {subtitle && <p className="text-[#e89a9a] text-xs font-bold uppercase tracking-[0.2em] mb-1">{subtitle}</p>}
-          <h2 className="text-3xl font-serif font-bold text-[#2d2424]">{title}</h2>
-        </div>
-      </div>
+const SectionTitle = ({ title, subtitle, action }: { title: string; subtitle?: string; action?: React.ReactNode }) => (
+  <div className="flex justify-between items-end mb-6 px-2">
+    <div>
+      {subtitle && <p className="text-[#e89a9a] text-xs font-bold uppercase tracking-[0.2em] mb-1">{subtitle}</p>}
+      <h2 className="text-3xl font-serif font-bold text-[#2d2424]">{title}</h2>
     </div>
-  );
-};
+    {action}
+  </div>
+);
 
 // --- Main App ---
 
 export default function App() {
-  const [user, setUser] = useState<any>(null);
+  const [tgUser, setTgUser] = useState<any>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [masterInfo, setMasterInfo] = useState<any>(null);
-  const [availability, setAvailability] = useState<Availability[]>([]);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [masterInfo, setMasterInfo] = useState<MasterInfo | null>(null);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [news, setNews] = useState<News[]>([]);
+  const [portfolio, setPortfolio] = useState<Portfolio[]>([]);
+  const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('master_mode') === 'true');
   const [loading, setLoading] = useState(true);
+
+  // Stable client ID for Telegram or Browser
+  const clientId = useMemo(() => {
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.initDataUnsafe?.user?.id) return `tg_${tg.initDataUnsafe.user.id}`;
+    
+    let localId = localStorage.getItem('client_id');
+    if (!localId) {
+      localId = `client_${Math.random().toString(36).substr(2, 9)}`;
+      localStorage.setItem('client_id', localId);
+    }
+    return localId;
+  }, []);
 
   useEffect(() => {
     const tg = (window as any).Telegram?.WebApp;
     if (tg) {
       tg.ready();
       tg.expand();
+      setTgUser(tg.initDataUnsafe?.user);
+      tg.setHeaderColor('#fdfbf7');
     }
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (u) => {
-      if (u) {
-        setUser(u);
-        const userDoc = await getDoc(doc(db, 'users', u.uid));
-        if (userDoc.exists() && userDoc.data().role === 'admin') {
-          setIsAdmin(true);
-        } else if (u.email === 'egor0info1@gmail.com') { 
-          setIsAdmin(true);
-          await setDoc(doc(db, 'users', u.uid), { role: 'admin', email: u.email }, { merge: true });
-        }
-
-        // Связываем Telegram ID с пользователем
-        if (tg?.initDataUnsafe?.user) {
-          fetch('/api/link-tg', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              uid: u.uid,
-              tgId: tg.initDataUnsafe.user.id,
-              firstName: tg.initDataUnsafe.user.first_name
-            })
-          });
-        }
-      } else {
-        signInAnonymously(auth);
-      }
+    const unsubServices = onSnapshot(collection(db, 'services'), (snapshot) => {
+      setServices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Service)));
     });
 
-    onSnapshot(collection(db, 'services'), (s) => setServices(s.docs.map(d => ({ id: d.id, ...d.data() } as Service))));
-    onSnapshot(doc(db, 'masterInfo', 'main'), (d) => d.exists() && setMasterInfo(d.data()));
-    onSnapshot(collection(db, 'availability'), (s) => setAvailability(s.docs.map(d => ({ id: d.id, ...d.data() } as Availability))));
+    const unsubMaster = onSnapshot(doc(db, 'masterInfo', 'main'), (doc) => {
+      if (doc.exists()) setMasterInfo(doc.data() as MasterInfo);
+    });
+
+    const unsubReviews = onSnapshot(query(collection(db, 'reviews'), orderBy('date', 'desc'), limit(10)), (snapshot) => {
+      setReviews(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Review)));
+    });
+
+    const unsubNews = onSnapshot(query(collection(db, 'news'), where('active', '==', true), orderBy('date', 'desc')), (snapshot) => {
+      setNews(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as News)));
+    });
+
+    const unsubPortfolio = onSnapshot(query(collection(db, 'portfolio'), orderBy('date', 'desc'), limit(8)), (snapshot) => {
+      setPortfolio(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Portfolio)));
+    });
 
     setLoading(false);
-    return () => unsubscribeAuth();
+
+    return () => {
+      unsubServices();
+      unsubMaster();
+      unsubReviews();
+      unsubNews();
+      unsubPortfolio();
+    };
   }, []);
 
   useEffect(() => {
-    if (user) {
+    if (clientId) {
       const q = isAdmin 
-        ? query(collection(db, 'appointments'), orderBy('createdAt', 'desc'))
-        : query(collection(db, 'appointments'), where('clientId', '==', user.uid), orderBy('createdAt', 'desc'));
-      return onSnapshot(q, (s) => setAppointments(s.docs.map(d => ({ id: d.id, ...d.data() } as Appointment))));
+        ? query(collection(db, 'appointments'), orderBy('date', 'desc'))
+        : query(collection(db, 'appointments'), where('clientId', '==', clientId), orderBy('date', 'desc'));
+      
+      const unsubAppointments = onSnapshot(q, (snapshot) => {
+        setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Appointment)));
+      });
+      return () => unsubAppointments();
     }
-  }, [user, isAdmin]);
+  }, [clientId, isAdmin]);
 
-  const handleGoogleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+  const toggleAdmin = (code: string) => {
+    if (code === 'MARGO26') {
+      setIsAdmin(true);
+      localStorage.setItem('master_mode', 'true');
+      return true;
+    }
+    return false;
   };
 
-  if (loading) return <div className="flex items-center justify-center h-screen text-[#e89a9a]">Загрузка...</div>;
+  const logoutAdmin = () => {
+    setIsAdmin(false);
+    localStorage.removeItem('master_mode');
+  };
+
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center h-screen bg-[#fdfbf7] space-y-4">
+      <motion.div 
+        animate={{ scale: [1, 1.1, 1], opacity: [0.5, 1, 0.5] }} 
+        transition={{ repeat: Infinity, duration: 2 }}
+        className="text-3xl font-serif italic text-[#e89a9a]"
+      >
+        Beauty Salon
+      </motion.div>
+      <div className="w-12 h-0.5 bg-[#e89a9a]/20 rounded-full overflow-hidden">
+        <motion.div 
+          animate={{ x: [-50, 50] }} 
+          transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
+          className="w-1/2 h-full bg-[#e89a9a]"
+        />
+      </div>
+    </div>
+  );
 
   return (
     <Router>
-      <div className="min-h-screen bg-[#fdfbf7] text-[#2d2424] pb-28">
+      <div className="min-h-screen bg-[#fdfbf7] text-[#2d2424] font-sans pb-28 selection:bg-[#e89a9a]/20">
         <div className="max-w-md mx-auto px-5 pt-8">
           <Routes>
-            <Route path="/" element={<HomeView masterInfo={masterInfo} isAdmin={isAdmin} onLogin={handleGoogleLogin} />} />
-            <Route path="/services" element={<PriceList services={services} />} />
-            <Route path="/book" element={<Booking services={services} user={user} availability={availability} />} />
+            <Route path="/" element={<ClientHome masterInfo={masterInfo} news={news} portfolio={portfolio} reviews={reviews} />} />
+            <Route path="/services" element={<PriceList services={services} isAdmin={isAdmin} />} />
+            <Route path="/book" element={<Booking services={services} clientId={clientId} tgUser={tgUser} masterInfo={masterInfo} />} />
             <Route path="/my-appointments" element={<MyAppointments appointments={appointments} />} />
+            <Route path="/profile" element={<ClientProfile tgUser={tgUser} appointments={appointments} isAdmin={isAdmin} toggleAdmin={toggleAdmin} logoutAdmin={logoutAdmin} />} />
+            <Route path="/reviews" element={<Reviews reviews={reviews} clientId={clientId} tgUser={tgUser} />} />
+            
+            {/* Master Routes */}
             {isAdmin && (
               <>
-                <Route path="/master" element={<MasterMenu />} />
                 <Route path="/master/services" element={<ManageServices services={services} />} />
                 <Route path="/master/appointments" element={<ManageAppointments appointments={appointments} />} />
-                <Route path="/master/calendar" element={<ManageCalendar availability={availability} />} />
                 <Route path="/master/profile" element={<ManageProfile masterInfo={masterInfo} />} />
+                <Route path="/master/news" element={<ManageNews news={news} />} />
+                <Route path="/master/portfolio" element={<ManagePortfolio portfolio={portfolio} />} />
               </>
             )}
           </Routes>
         </div>
-        <nav className="fixed bottom-6 left-5 right-5 h-20 bg-white/90 backdrop-blur-2xl rounded-[32px] shadow-lg border border-white/50 px-8 flex justify-between items-center z-50">
+
+        {/* Bottom Navigation */}
+        <nav className="fixed bottom-6 left-5 right-5 h-20 bg-white/95 backdrop-blur-xl rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-white/50 px-8 flex justify-between items-center z-50">
           <NavLink to="/" icon={<Home size={22} />} label="Главная" />
           <NavLink to="/services" icon={<ClipboardList size={22} />} label="Прайс" />
           <NavLink to="/book" icon={<Plus size={28} className="text-white" />} label="Запись" isFab />
           <NavLink to="/my-appointments" icon={<Calendar size={22} />} label="Записи" />
-          <NavLink to={isAdmin ? "/master" : "/"} icon={isAdmin ? <LayoutDashboard size={22} /> : <User size={22} />} label={isAdmin ? "Мастер" : "Профиль"} />
+          <NavLink to="/profile" icon={<User size={22} />} label="Профиль" />
         </nav>
       </div>
     </Router>
   );
 }
 
-function NavLink({ to, icon, label, isFab }: any) {
+function NavLink({ to, icon, label, isFab }: { to: string; icon: React.ReactNode; label: string; isFab?: boolean }) {
   const location = useLocation();
-  const isActive = location.pathname === to || (to === '/master' && location.pathname.startsWith('/master'));
-  if (isFab) return (
-    <Link to={to} className="relative -top-10">
-      <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="bg-[#e89a9a] p-5 rounded-full shadow-xl text-white">
-        {icon}
-      </motion.div>
-    </Link>
-  );
-  return (
-    <Link to={to} className={cn("flex flex-col items-center gap-1 transition-all", isActive ? "text-[#e89a9a] scale-110" : "text-slate-300")}>
-      {icon}
-      <span className="text-[9px] font-bold uppercase tracking-widest">{label}</span>
-    </Link>
-  );
-}
+  const isActive = to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
 
-// --- Views ---
-
-function HomeView({ masterInfo, isAdmin, onLogin }: any) {
-  return (
-    <div className="space-y-10 text-center">
-      {!isAdmin && (
-        <div className="flex justify-end">
-          <button onClick={onLogin} className="text-[10px] text-slate-300 uppercase font-bold tracking-widest flex items-center gap-1">
-            <LogIn size={12} /> Вход
-          </button>
-        </div>
-      )}
-      <header className="space-y-4">
-        <div className="w-32 h-32 mx-auto rounded-[48px] overflow-hidden border-8 border-white shadow-2xl rotate-3">
-          <img src={masterInfo?.photoUrl || "https://picsum.photos/seed/master/400"} alt="Master" className="w-full h-full object-cover" />
-        </div>
-        <h1 className="text-4xl font-serif font-bold">{masterInfo?.name || "Ваш Мастер"}</h1>
-        <p className="text-[#e89a9a] font-bold uppercase tracking-widest text-xs">{masterInfo?.experience || "5 лет опыта"}</p>
-      </header>
-      <Card className="bg-[#f5f2ed]/50 border-none italic text-sm text-slate-600">
-        {masterInfo?.bio || "Добро пожаловать в мой салон!"}
-      </Card>
-      <Link to="/book" className="block">
-        <Button className="w-full py-5 text-lg">Записаться онлайн</Button>
+  if (isFab) {
+    return (
+      <Link to={to} className="relative -top-10">
+        <motion.div 
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          className="bg-[#e89a9a] p-5 rounded-full shadow-[0_15px_30px_rgba(232,154,154,0.4)] text-white"
+        >
+          {icon}
+        </motion.div>
       </Link>
-    </div>
+    );
+  }
+
+  return (
+    <Link to={to} className={cn("flex flex-col items-center gap-1.5 transition-all duration-300", isActive ? "text-[#e89a9a] scale-110" : "text-slate-300")}>
+      <div className={cn("transition-transform duration-300", isActive && "scale-110")}>
+        {icon}
+      </div>
+      <span className={cn("text-[9px] font-bold uppercase tracking-[0.15em] transition-opacity", isActive ? "opacity-100" : "opacity-60")}>{label}</span>
+    </Link>
   );
 }
 
-function MasterMenu() {
-  const menuItems = [
-    { to: "/master/appointments", icon: <ClipboardList size={32} />, label: "Заявки", color: "bg-amber-50 text-amber-500" },
-    { to: "/master/calendar", icon: <CalendarDays size={32} />, label: "График", color: "bg-emerald-50 text-emerald-500" },
-    { to: "/master/services", icon: <PlusCircle size={32} />, label: "Услуги", color: "bg-blue-50 text-blue-500" },
-    { to: "/master/profile", icon: <User size={32} />, label: "Профиль", color: "bg-purple-50 text-purple-500" },
-  ];
+// --- Client Views ---
 
+function ClientHome({ masterInfo, news, portfolio, reviews }: { masterInfo: MasterInfo | null; news: News[]; portfolio: Portfolio[]; reviews: Review[] }) {
   return (
-    <div className="space-y-8">
-      <SectionTitle title="Меню" subtitle="Мастер" />
-      <div className="grid grid-cols-2 gap-4">
-        {menuItems.map((item) => (
-          <Link key={item.to} to={item.to}>
-            <Card className="flex flex-col items-center gap-4 py-8 hover:bg-[#e89a9a]/5">
-              <div className={cn("p-4 rounded-2xl", item.color)}>
-                {item.icon}
-              </div>
-              <span className="font-bold uppercase tracking-widest text-xs">{item.label}</span>
-            </Card>
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PriceList({ services }: any) {
-  const [selectedService, setSelectedService] = useState<Service | null>(null);
-
-  return (
-    <div className="space-y-8">
-      <SectionTitle title="Прайс" subtitle="Услуги" />
-      <div className="space-y-4">
-        {services.map((s) => (
-          <Card key={s.id} onClick={() => setSelectedService(s)} className="cursor-pointer">
-            <div className="flex justify-between items-start">
-              <div>
-                <h3 className="font-bold text-lg">{s.name}</h3>
-                <p className="text-xs text-slate-400">{s.shortDescription}</p>
-              </div>
-              <div className="text-xl font-serif font-bold text-[#e89a9a]">{s.price} ₽</div>
-            </div>
-          </Card>
-        ))}
-      </div>
-
-      <AnimatePresence>
-        {selectedService && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-end">
-            <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} className="bg-white w-full rounded-t-[40px] p-8 space-y-6">
-              <div className="flex justify-between items-start">
-                <h2 className="text-2xl font-serif font-bold">{selectedService.name}</h2>
-                <button onClick={() => setSelectedService(null)}><XCircle className="text-slate-300" /></button>
-              </div>
-              <p className="text-slate-500 leading-relaxed">{selectedService.fullDescription}</p>
-              <div className="flex justify-between items-center pt-4 border-t">
-                <span className="text-2xl font-serif font-bold">{selectedService.price} ₽</span>
-                <Link to="/book" state={{ serviceId: selectedService.id }}>
-                  <Button onClick={() => setSelectedService(null)}>Записаться</Button>
-                </Link>
-              </div>
-            </motion.div>
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-12 pb-10">
+      {/* Hero Section */}
+      <header className="text-center space-y-6 pt-6 relative">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-64 bg-[#e89a9a]/5 rounded-full blur-3xl -z-10" />
+        
+        <motion.div 
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="relative inline-block"
+        >
+          <div className="w-40 h-40 mx-auto rounded-[56px] overflow-hidden border-[12px] border-white shadow-[0_20px_50px_rgba(0,0,0,0.1)]">
+            <img 
+              src={masterInfo?.photoUrl || "https://picsum.photos/seed/master/400"} 
+              alt="Master" 
+              className="w-full h-full object-cover transition-transform duration-700 hover:scale-110"
+              referrerPolicy="no-referrer"
+            />
           </div>
-        )}
-      </AnimatePresence>
-    </div>
+          <motion.div 
+            animate={{ y: [0, -10, 0] }}
+            transition={{ repeat: Infinity, duration: 3 }}
+            className="absolute -bottom-2 -right-2 bg-white p-4 rounded-[20px] shadow-xl text-[#e89a9a]"
+          >
+            <Heart size={24} fill="currentColor" />
+          </motion.div>
+        </motion.div>
+
+        <div className="space-y-2">
+          <h1 className="text-5xl font-serif font-bold text-[#2d2424] tracking-tight">
+            {masterInfo?.name || "Маргарита"}
+          </h1>
+          <div className="inline-block px-4 py-1.5 bg-[#e89a9a]/10 rounded-full">
+            <p className="text-[#e89a9a] font-bold uppercase tracking-[0.25em] text-[10px]">
+              {masterInfo?.experience || "5 лет опыта"}
+            </p>
+          </div>
+        </div>
+      </header>
+
+      {/* Quick Action */}
+      <div className="px-2">
+        <Link to="/book">
+          <Button className="w-full py-6 text-lg shadow-[0_20px_40px_rgba(232,154,154,0.3)]">
+            Записаться онлайн
+          </Button>
+        </Link>
+      </div>
+
+      {/* Bio */}
+      <section className="px-2">
+        <div className="bg-white rounded-[40px] p-8 shadow-[0_10px_40px_rgba(0,0,0,0.03)] border border-[#f5f2ed] relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-4 opacity-5">
+            <Info size={80} />
+          </div>
+          <p className="text-[#2d2424]/80 leading-relaxed text-lg font-serif italic text-center">
+            "{masterInfo?.bio || "Добро пожаловать в мой уютный салон! Я специализируюсь на современных техниках окрашивания и стрижках. Моя цель — подчеркнуть вашу естественную красоту."}"
+          </p>
+        </div>
+      </section>
+
+      {/* News / Promotions */}
+      {news.length > 0 && (
+        <section>
+          <SectionTitle title="Новости" subtitle="Акции и события" />
+          <div className="flex gap-5 overflow-x-auto pb-6 no-scrollbar px-2">
+            {news.map(item => (
+              <motion.div 
+                key={item.id} 
+                whileHover={{ y: -5 }}
+                className="flex-shrink-0 w-80 bg-white rounded-[40px] overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.05)] border border-[#f5f2ed]"
+              >
+                {item.imageUrl && (
+                  <div className="h-48 overflow-hidden">
+                    <img src={item.imageUrl} className="w-full h-full object-cover" alt={item.title} referrerPolicy="no-referrer" />
+                  </div>
+                )}
+                <div className="p-6 space-y-3">
+                  <h3 className="font-bold text-xl text-[#2d2424]">{item.title}</h3>
+                  <p className="text-sm text-slate-500 line-clamp-2 leading-relaxed">{item.content}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Portfolio Preview */}
+      <section>
+        <SectionTitle 
+          title="Портфолио" 
+          subtitle="Наши работы" 
+          action={<Link to="/master/portfolio" className="text-[10px] font-bold text-[#e89a9a] uppercase tracking-[0.2em] flex items-center gap-1 bg-[#e89a9a]/5 px-3 py-1.5 rounded-full">Все работы <ChevronRight size={12} /></Link>}
+        />
+        <div className="grid grid-cols-2 gap-4 px-2">
+          {portfolio.length > 0 ? portfolio.slice(0, 4).map((item, idx) => (
+            <motion.div 
+              key={item.id}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: idx * 0.1 }}
+              className={cn(
+                "aspect-[4/5] rounded-[32px] overflow-hidden shadow-sm relative group",
+                idx % 2 === 1 ? "mt-6" : ""
+              )}
+            >
+              <img 
+                src={item.imageUrl} 
+                className="w-full h-full object-cover" 
+                alt="Work"
+                referrerPolicy="no-referrer"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            </motion.div>
+          )) : [1, 2, 3, 4].map(i => (
+            <div key={i} className="aspect-square bg-slate-100 rounded-[32px] animate-pulse" />
+          ))}
+        </div>
+      </section>
+
+      {/* Reviews Preview */}
+      <section className="px-2">
+        <SectionTitle title="Отзывы" subtitle="Что говорят клиенты" />
+        <div className="space-y-5">
+          {reviews.slice(0, 2).map(review => (
+            <Card key={review.id} className="p-8">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-[#f5f2ed] rounded-full flex items-center justify-center text-[#e89a9a] font-bold text-xs">
+                    {review.clientName[0]}
+                  </div>
+                  <span className="font-bold text-sm">{review.clientName}</span>
+                </div>
+                <div className="flex gap-0.5">
+                  {[...Array(5)].map((_, i) => (
+                    <Star key={i} size={12} className={cn(i < review.rating ? "fill-yellow-400 text-yellow-400" : "text-slate-200")} />
+                  ))}
+                </div>
+              </div>
+              <p className="text-sm text-slate-600 italic leading-relaxed font-serif">"{review.comment}"</p>
+            </Card>
+          ))}
+          <Link to="/reviews">
+            <Button variant="secondary" className="w-full py-5 rounded-[24px]">Посмотреть все отзывы</Button>
+          </Link>
+        </div>
+      </section>
+    </motion.div>
   );
 }
 
-function Booking({ services, user, availability }: any) {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const [step, setStep] = useState(1);
-  const [formData, setFormData] = useState({
-    service: services.find((s: any) => s.id === location.state?.serviceId) || null,
-    date: null as Date | null,
-    time: null as string | null,
-    name: '',
-    phone: '',
-    comment: ''
-  });
+function PriceList({ services, isAdmin }: { services: Service[]; isAdmin: boolean }) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+      <div className="flex justify-between items-end px-2">
+        <div>
+          <p className="text-[#e89a9a] text-xs font-bold uppercase tracking-[0.2em] mb-1">Услуги</p>
+          <h1 className="text-4xl font-serif font-bold">Прайс-лист</h1>
+        </div>
+        {isAdmin && (
+          <Link to="/master/services">
+            <Button variant="secondary" className="px-4 py-2 text-xs uppercase tracking-widest">Управлять</Button>
+          </Link>
+        )}
+      </div>
+      
+      <Card className="bg-[#e89a9a]/5 border-[#e89a9a]/10 p-4">
+        <p className="text-xs text-[#e89a9a] font-medium leading-relaxed italic">
+          * Стоимость указана ориентировочно. Точная цена зависит от расхода материалов и сложности работы.
+        </p>
+      </Card>
 
-  const dateStr = formData.date ? format(formData.date, 'yyyy-MM-dd') : '';
-  const availableTimes = availability.find(a => a.id === dateStr)?.slots || [];
+      <div className="space-y-4">
+        {services.map(service => (
+          <motion.div 
+            key={service.id}
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="flex justify-between items-center p-4 border-b border-[#f5f2ed] group hover:bg-white hover:rounded-2xl transition-all"
+          >
+            <div className="space-y-1">
+              <h3 className="font-bold text-lg text-[#2d2424] group-hover:text-[#e89a9a] transition-colors">{service.name}</h3>
+              <p className="text-xs text-slate-400 max-w-[200px]">{service.description}</p>
+              <div className="flex items-center gap-2 text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+                <Clock size={12} />
+                <span>~{service.duration} мин</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xl font-serif font-bold text-[#2d2424]">{service.price} ₽</div>
+              <div className="text-[10px] font-bold text-[#e89a9a] uppercase tracking-widest">{service.priceRange}</div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+function Booking({ services, clientId, tgUser, masterInfo }: { services: Service[]; clientId: string; tgUser: any; masterInfo: MasterInfo | null }) {
+  const [selectedService, setSelectedService] = useState<Service | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date>(addDays(new Date(), 1));
+  const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [phone, setPhone] = useState(tgUser?.phone_number || '');
+  const [notes, setNotes] = useState('');
+  const [step, setStep] = useState(1);
+  const navigate = useNavigate();
+
+  const timeSlots = ["10:00", "11:30", "13:00", "14:30", "16:00", "17:30", "19:00"];
 
   const handleBook = async () => {
-    const appData = {
-      clientId: user.uid,
-      clientName: formData.name,
-      clientPhone: formData.phone,
-      clientComment: formData.comment,
-      serviceId: formData.service.id,
-      serviceName: formData.service.name,
-      date: dateStr,
-      time: formData.time,
-      status: 'pending',
-      createdAt: new Date().toISOString()
-    };
-    
-    const docRef = await addDoc(collection(db, 'appointments'), appData);
-    
-    // Уведомляем мастера через сервер
-    fetch('/api/notify-master', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ appointment: appData, appId: docRef.id })
-    });
+    if (!selectedService || !selectedTime || !clientId) return;
 
-    setStep(5);
+    const appointmentDate = format(selectedDate, 'yyyy-MM-dd') + ' ' + selectedTime;
+    
+    try {
+      const newAppointment = {
+        clientId: clientId,
+        clientName: tgUser?.first_name || 'Клиент',
+        clientPhone: phone,
+        serviceId: selectedService.id,
+        serviceName: selectedService.name,
+        date: appointmentDate,
+        status: 'pending',
+        notes,
+        createdAt: new Date().toISOString()
+      };
+
+      await addDoc(collection(db, 'appointments'), newAppointment);
+
+      // Notify master via API
+      fetch('/api/notify-master', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appointment: newAppointment
+        })
+      });
+
+      setStep(4);
+    } catch (error) {
+      console.error("Booking error:", error);
+    }
   };
 
   return (
-    <div className="space-y-8">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+      <div className="flex items-center gap-3 px-2">
+        {[1, 2, 3].map(i => (
+          <div key={i} className={cn("h-1.5 flex-1 rounded-full transition-all duration-500", step >= i ? "bg-[#e89a9a]" : "bg-[#f5f2ed]")} />
+        ))}
+      </div>
+
       {step === 1 && (
         <div className="space-y-6">
-          <SectionTitle title="Услуга" subtitle="Шаг 1" />
-          {services.map((s: any) => (
-            <Card key={s.id} onClick={() => setFormData({...formData, service: s})} className={cn(formData.service?.id === s.id && "border-[#e89a9a] bg-[#e89a9a]/5")}>
-              <div className="flex justify-between items-center">
-                <span className="font-bold">{s.name}</span>
-                <span className="text-[#e89a9a] font-bold">{s.price} ₽</span>
-              </div>
-            </Card>
-          ))}
-          <Button className="w-full" disabled={!formData.service} onClick={() => setStep(2)}>Далее</Button>
+          <SectionTitle title="Услуга" subtitle="Шаг 1 из 3" />
+          <div className="space-y-4">
+            {services.map(service => (
+              <Card 
+                key={service.id} 
+                className={cn(
+                  "cursor-pointer border-2 transition-all p-5",
+                  selectedService?.id === service.id ? "border-[#e89a9a] bg-[#e89a9a]/5" : "border-transparent"
+                )}
+                onClick={() => setSelectedService(service)}
+              >
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="font-bold text-lg">{service.name}</h3>
+                    <p className="text-xs text-slate-400">{service.description}</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-serif font-bold text-xl text-[#e89a9a]">{service.price} ₽</div>
+                    <div className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">~{service.duration} мин</div>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+          <Button 
+            className="w-full py-5" 
+            disabled={!selectedService} 
+            onClick={() => setStep(2)}
+          >
+            Продолжить <ArrowRight size={18} />
+          </Button>
         </div>
       )}
 
       {step === 2 && (
         <div className="space-y-8">
-          <SectionTitle title="Дата" subtitle="Шаг 2" />
-          <div className="grid grid-cols-4 gap-3">
-            {[...Array(12)].map((_, i) => {
-              const d = addDays(new Date(), i);
-              const hasSlots = availability.some(a => a.id === format(d, 'yyyy-MM-dd') && a.slots.length > 0);
+          <SectionTitle title="Дата и время" subtitle="Шаг 2 из 3" />
+          
+          <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar px-2">
+            {[...Array(14)].map((_, i) => {
+              const date = addDays(new Date(), i + 1);
+              const isSelected = isSameDay(date, selectedDate);
               return (
-                <div key={i} onClick={() => hasSlots && setFormData({...formData, date: d})} className={cn("h-20 rounded-2xl flex flex-col items-center justify-center border-2 transition-all", !hasSlots ? "opacity-20 grayscale" : isSameDay(d, formData.date!) ? "bg-[#e89a9a] text-white border-[#e89a9a]" : "bg-white border-[#f5f2ed]")}>
-                  <span className="text-[10px] uppercase font-bold">{format(d, 'EEE', { locale: ru })}</span>
-                  <span className="text-xl font-serif font-bold">{format(d, 'd')}</span>
-                </div>
+                <motion.div
+                  key={i}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setSelectedDate(date)}
+                  className={cn(
+                    "flex-shrink-0 w-20 h-24 rounded-[28px] flex flex-col items-center justify-center cursor-pointer transition-all border-2",
+                    isSelected ? "bg-[#e89a9a] text-white border-[#e89a9a] shadow-xl shadow-[#e89a9a]/30" : "bg-white text-slate-600 border-[#f5f2ed]"
+                  )}
+                >
+                  <span className="text-[10px] uppercase font-bold tracking-widest opacity-70 mb-1">{format(date, 'EEE', { locale: ru })}</span>
+                  <span className="text-2xl font-serif font-bold">{format(date, 'd')}</span>
+                </motion.div>
               );
             })}
           </div>
-          <Button className="w-full" disabled={!formData.date} onClick={() => setStep(3)}>Далее</Button>
+
+          <div className="grid grid-cols-3 gap-3">
+            {timeSlots.map(time => (
+              <motion.div
+                key={time}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setSelectedTime(time)}
+                className={cn(
+                  "py-4 rounded-2xl text-center font-bold cursor-pointer border-2 transition-all",
+                  selectedTime === time ? "bg-[#e89a9a] text-white border-[#e89a9a] shadow-lg shadow-[#e89a9a]/20" : "bg-white text-slate-600 border-[#f5f2ed]"
+                )}
+              >
+                {time}
+              </motion.div>
+            ))}
+          </div>
+
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setStep(1)}>Назад</Button>
+            <Button className="flex-[2]" disabled={!selectedTime} onClick={() => setStep(3)}>Далее</Button>
+          </div>
         </div>
       )}
 
       {step === 3 && (
         <div className="space-y-8">
-          <SectionTitle title="Время" subtitle="Шаг 3" />
-          <div className="grid grid-cols-3 gap-3">
-            {availableTimes.map(t => (
-              <div key={t} onClick={() => setFormData({...formData, time: t})} className={cn("py-4 rounded-2xl text-center font-bold border-2", formData.time === t ? "bg-[#e89a9a] text-white border-[#e89a9a]" : "bg-white border-[#f5f2ed]")}>
-                {t}
+          <SectionTitle title="Контактные данные" subtitle="Шаг 3 из 3" />
+          <Card className="space-y-6 p-8 bg-[#f5f2ed]/30 border-none">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ваш номер телефона</label>
+                <input
+                  type="tel"
+                  placeholder="+7 (999) 000-00-00"
+                  className="w-full p-4 rounded-2xl bg-white border border-[#f5f2ed] focus:outline-none focus:ring-2 focus:ring-[#e89a9a]/20"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                />
               </div>
-            ))}
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Комментарий (необязательно)</label>
+                <textarea
+                  placeholder="Добавьте пожелания..."
+                  className="w-full p-4 rounded-2xl bg-white border border-[#f5f2ed] focus:outline-none focus:ring-2 focus:ring-[#e89a9a]/20 min-h-[100px]"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-[#e89a9a]/10 space-y-3">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400 italic">Услуга:</span>
+                <span className="font-bold">{selectedService?.name}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400 italic">Дата:</span>
+                <span className="font-bold">{format(selectedDate, 'd MMMM', { locale: ru })} в {selectedTime}</span>
+              </div>
+              <div className="flex justify-between items-center pt-2">
+                <span className="text-slate-400 italic">Итого:</span>
+                <span className="font-serif font-bold text-2xl text-[#e89a9a]">{selectedService?.price} ₽</span>
+              </div>
+            </div>
+          </Card>
+
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setStep(2)}>Назад</Button>
+            <Button className="flex-[2]" disabled={!phone} onClick={handleBook}>Подтвердить запись</Button>
           </div>
-          <Button className="w-full" disabled={!formData.time} onClick={() => setStep(4)}>Далее</Button>
         </div>
       )}
 
       {step === 4 && (
-        <div className="space-y-6">
-          <SectionTitle title="Контакты" subtitle="Шаг 4" />
-          <Card className="space-y-4">
-            <input className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" placeholder="Ваше Имя и Фамилия" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-            <input className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" placeholder="Номер телефона" type="tel" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
-            <textarea className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none text-sm" placeholder="Комментарий" value={formData.comment} onChange={e => setFormData({...formData, comment: e.target.value})} />
-          </Card>
-          <Button className="w-full" disabled={!formData.name || !formData.phone} onClick={handleBook}>Подтвердить</Button>
-        </div>
+        <motion.div 
+          initial={{ scale: 0.8, opacity: 0 }} 
+          animate={{ scale: 1, opacity: 1 }}
+          className="text-center space-y-8 py-12"
+        >
+          <div className="relative inline-block">
+            <div className="w-24 h-24 bg-emerald-50 text-emerald-500 rounded-[40px] flex items-center justify-center mx-auto rotate-12">
+              <CheckCircle2 size={48} className="-rotate-12" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-3xl font-serif font-bold">Заявка принята!</h2>
+            <p className="text-slate-500 text-sm leading-relaxed max-w-[280px] mx-auto">
+              Мастер рассмотрит вашу запись и подтвердит её. Вы получите уведомление в Telegram.
+            </p>
+          </div>
+          
+          <div className="space-y-4 pt-4">
+            <Button className="w-full" onClick={() => navigate('/my-appointments')}>Посмотреть мои записи</Button>
+            <div className="grid grid-cols-2 gap-3">
+              <Button variant="secondary" className="text-xs" onClick={() => window.open(`tel:${masterInfo?.phone || ''}`)}>
+                <Phone size={16} /> Позвонить
+              </Button>
+              <Button variant="secondary" className="text-xs" onClick={() => window.open(`https://t.me/${masterInfo?.telegram || ''}`)}>
+                <MessageSquare size={16} /> Написать
+              </Button>
+            </div>
+          </div>
+        </motion.div>
       )}
-
-      {step === 5 && (
-        <div className="text-center space-y-6 py-12">
-          <CheckCircle2 size={64} className="mx-auto text-emerald-500" />
-          <h2 className="text-3xl font-serif font-bold">Готово!</h2>
-          <Button className="w-full" onClick={() => navigate('/my-appointments')}>Мои записи</Button>
-        </div>
-      )}
-    </div>
+    </motion.div>
   );
 }
 
-function MyAppointments({ appointments }: any) {
+function MyAppointments({ appointments }: { appointments: Appointment[] }) {
   return (
-    <div className="space-y-8">
-      <SectionTitle title="Записи" subtitle="Мои" />
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+      <SectionTitle title="Мои записи" subtitle="История и статус" />
+      
       {appointments.length === 0 ? (
-        <p className="text-center text-slate-400 py-10">Записей пока нет</p>
+        <div className="text-center py-24 space-y-4">
+          <div className="w-20 h-20 bg-[#f5f2ed] rounded-[32px] flex items-center justify-center mx-auto text-slate-300">
+            <Calendar size={32} />
+          </div>
+          <p className="text-slate-400 font-medium">У вас пока нет записей</p>
+          <Link to="/book" className="inline-block">
+            <Button variant="outline" className="text-xs">Записаться сейчас</Button>
+          </Link>
+        </div>
       ) : (
-        appointments.map((app: any) => (
-          <Card key={app.id} className="space-y-2">
-            <div className="flex justify-between items-start">
-              <h3 className="font-bold text-lg">{app.serviceName}</h3>
-              <Badge status={app.status} />
-            </div>
-            <div className="flex items-center gap-2 text-xs text-[#e89a9a] font-bold uppercase">
-              <Calendar size={14} /> {app.date} в {app.time}
-            </div>
-          </Card>
-        ))
-      )}
-    </div>
-  );
-}
-
-// --- Master Views ---
-
-function ManageServices({ services }: any) {
-  const [form, setForm] = useState({ name: '', short: '', full: '', price: '' });
-  const handleAdd = async () => {
-    await addDoc(collection(db, 'services'), { 
-      name: form.name, 
-      shortDescription: form.short, 
-      fullDescription: form.full, 
-      price: Number(form.price) 
-    });
-    setForm({ name: '', short: '', full: '', price: '' });
-  };
-  return (
-    <div className="space-y-8">
-      <SectionTitle title="Услуги" subtitle="Мастер" backTo="/master" />
-      <Card className="space-y-4">
-        <input className="w-full p-3 border rounded-xl" placeholder="Название" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
-        <input className="w-full p-3 border rounded-xl" placeholder="Краткое описание" value={form.short} onChange={e => setForm({...form, short: e.target.value})} />
-        <textarea className="w-full p-3 border rounded-xl" placeholder="Полное описание" value={form.full} onChange={e => setForm({...form, full: e.target.value})} />
-        <input className="w-full p-3 border rounded-xl" placeholder="Цена" type="number" value={form.price} onChange={e => setForm({...form, price: e.target.value})} />
-        <Button className="w-full py-3" onClick={handleAdd}>Добавить</Button>
-      </Card>
-      {services.map((s: any) => (
-        <Card key={s.id} className="flex justify-between items-center">
-          <div><div className="font-bold">{s.name}</div><div className="text-xs text-slate-400">{s.price} ₽</div></div>
-          <button onClick={() => deleteDoc(doc(db, 'services', s.id))}><Trash2 size={18} className="text-rose-500" /></button>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
-function ManageAppointments({ appointments }: any) {
-  const updateStatus = async (id: string, status: string) => {
-    await updateDoc(doc(db, 'appointments', id), { status });
-  };
-  return (
-    <div className="space-y-8">
-      <SectionTitle title="Заявки" subtitle="Мастер" backTo="/master" />
-      {appointments.map((app: any) => (
-        <Card key={app.id} className="space-y-4">
-          <div className="flex justify-between">
-            <div>
-              <div className="font-bold text-lg">{app.clientName}</div>
-              <div className="flex items-center gap-1 text-[#e89a9a] font-bold text-sm"><Phone size={14} /> {app.clientPhone}</div>
-            </div>
-            <Badge status={app.status} />
-          </div>
-          <div className="bg-[#f5f2ed]/50 p-4 rounded-2xl space-y-2 text-sm">
-            <div className="flex justify-between"><span>Услуга:</span><span className="font-bold">{app.serviceName}</span></div>
-            <div className="flex justify-between"><span>Дата:</span><span className="font-bold">{app.date} в {app.time}</span></div>
-            {app.clientComment && <div className="pt-2 border-t border-white italic">"{app.clientComment}"</div>}
-          </div>
-          {app.status === 'pending' && (
-            <div className="flex gap-2">
-              <Button className="flex-1 py-3" onClick={() => updateStatus(app.id, 'confirmed')}>Ок</Button>
-              <Button variant="secondary" className="flex-1 py-3 text-rose-500" onClick={() => updateStatus(app.id, 'rejected')}>Нет</Button>
-            </div>
-          )}
-        </Card>
-      ))}
-    </div>
-  );
-}
-
-function ManageCalendar({ availability }: any) {
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [timeInput, setTimeInput] = useState('');
-  const dateStr = format(selectedDate, 'yyyy-MM-dd');
-  const slots = availability.find(a => a.id === dateStr)?.slots || [];
-
-  const addSlot = async () => {
-    if (!timeInput) return;
-    const newSlots = [...slots, timeInput].sort();
-    await setDoc(doc(db, 'availability', dateStr), { slots: newSlots });
-    setTimeInput('');
-  };
-
-  const removeSlot = async (slot: string) => {
-    const newSlots = slots.filter(s => s !== slot);
-    await setDoc(doc(db, 'availability', dateStr), { slots: newSlots });
-  };
-
-  return (
-    <div className="space-y-8">
-      <SectionTitle title="График" subtitle="Мастер" backTo="/master" />
-      <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar">
-        {[...Array(14)].map((_, i) => {
-          const d = addDays(new Date(), i);
-          return (
-            <div key={i} onClick={() => setSelectedDate(d)} className={cn("flex-shrink-0 w-16 h-20 rounded-2xl flex flex-col items-center justify-center border-2 transition-all", isSameDay(d, selectedDate) ? "bg-[#e89a9a] text-white border-[#e89a9a]" : "bg-white border-[#f5f2ed]")}>
-              <span className="text-[10px] uppercase font-bold">{format(d, 'EEE', { locale: ru })}</span>
-              <span className="text-xl font-serif font-bold">{format(d, 'd')}</span>
-            </div>
-          );
-        })}
-      </div>
-      <Card className="space-y-6">
-        <h3 className="font-bold text-center">{format(selectedDate, 'd MMMM', { locale: ru })}</h3>
-        <div className="grid grid-cols-3 gap-2">
-          {slots.map(s => (
-            <div key={s} className="bg-[#f5f2ed] py-2 rounded-xl flex items-center justify-center gap-2">
-              <span className="font-bold text-sm">{s}</span>
-              <button onClick={() => removeSlot(s)}><X size={14} className="text-rose-500" /></button>
-            </div>
+        <div className="space-y-6">
+          {appointments.map(app => (
+            <Card key={app.id} className="space-y-4 overflow-hidden relative">
+              <div className="absolute top-0 right-0 p-4">
+                <Badge status={app.status} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-bold text-xl pr-24 leading-tight">{app.serviceName}</h3>
+                <div className="flex items-center gap-4 text-slate-400 text-xs font-bold uppercase tracking-widest">
+                  <div className="flex items-center gap-1">
+                    <Calendar size={14} className="text-[#e89a9a]" />
+                    <span>{format(parseISO(app.date.split(' ')[0]), 'd MMMM', { locale: ru })}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Clock size={14} className="text-[#e89a9a]" />
+                    <span>{app.date.split(' ')[1]}</span>
+                  </div>
+                </div>
+              </div>
+              {app.notes && (
+                <div className="bg-[#f5f2ed]/50 p-4 rounded-2xl text-xs text-slate-500 italic border-l-4 border-[#e89a9a]">
+                  "{app.notes}"
+                </div>
+              )}
+              {app.status === 'pending' && (
+                <div className="flex items-center gap-2 text-[10px] font-bold text-amber-500 uppercase tracking-widest">
+                  <AlertCircle size={12} />
+                  <span>Ожидает подтверждения мастером</span>
+                </div>
+              )}
+            </Card>
           ))}
         </div>
-        <div className="flex gap-2">
-          <input type="time" className="flex-1 p-3 border rounded-xl" value={timeInput} onChange={e => setTimeInput(e.target.value)} />
-          <Button onClick={addSlot} className="px-4"><Plus size={20} /></Button>
+      )}
+    </motion.div>
+  );
+}
+
+function ClientProfile({ tgUser, appointments, isAdmin, toggleAdmin, logoutAdmin }: { tgUser: any; appointments: Appointment[]; isAdmin: boolean; toggleAdmin: (code: string) => boolean; logoutAdmin: () => void }) {
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+
+  const handleLogin = () => {
+    if (toggleAdmin(code)) {
+      setShowAdminLogin(false);
+      setCode('');
+      setError('');
+    } else {
+      setError('Неверный код доступа');
+    }
+  };
+
+  const confirmedCount = appointments.filter(a => a.status === 'confirmed').length;
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+      <SectionTitle title="Профиль" subtitle="Личный кабинет" />
+
+      <Card className="flex items-center gap-6 p-8 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-[#e89a9a]/5 rounded-full -mr-16 -mt-16" />
+        <div className="w-20 h-20 bg-[#f5f2ed] rounded-[28px] flex items-center justify-center text-[#e89a9a] text-3xl font-serif font-bold shadow-inner">
+          {tgUser?.first_name?.[0] || 'К'}
+        </div>
+        <div className="space-y-1">
+          <h2 className="text-2xl font-serif font-bold text-[#2d2424]">{tgUser?.first_name || 'Гость'}</h2>
+          <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Клиент салона</p>
         </div>
       </Card>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Card className="text-center p-6 bg-emerald-50/30 border-none">
+          <div className="text-2xl font-serif font-bold text-emerald-600">{confirmedCount}</div>
+          <p className="text-[10px] font-bold text-emerald-600/60 uppercase tracking-widest mt-1">Визитов</p>
+        </Card>
+        <Card className="text-center p-6 bg-amber-50/30 border-none">
+          <div className="text-2xl font-serif font-bold text-amber-600">{appointments.length}</div>
+          <p className="text-[10px] font-bold text-amber-600/60 uppercase tracking-widest mt-1">Всего записей</p>
+        </Card>
+      </div>
+
+      <div className="space-y-4">
+        <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400 ml-2">Настройки</h3>
+        <Card className="p-0 overflow-hidden">
+          <button 
+            onClick={() => setShowAdminLogin(true)}
+            className="w-full p-6 flex justify-between items-center hover:bg-slate-50 transition-colors"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400">
+                <Settings size={20} />
+              </div>
+              <span className="font-bold text-sm">Панель мастера</span>
+            </div>
+            <ChevronRight size={18} className="text-slate-300" />
+          </button>
+          
+          {isAdmin && (
+            <button 
+              onClick={logoutAdmin}
+              className="w-full p-6 flex justify-between items-center hover:bg-rose-50 transition-colors border-t border-slate-50"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-400">
+                  <XCircle size={20} />
+                </div>
+                <span className="font-bold text-sm text-rose-500">Выйти из режима мастера</span>
+              </div>
+            </button>
+          )}
+        </Card>
+      </div>
+
+      <AnimatePresence>
+        {showAdminLogin && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-[#2d2424]/60 backdrop-blur-md z-[100] flex items-center justify-center p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white w-full max-w-sm rounded-[40px] p-10 shadow-2xl space-y-8"
+            >
+              <div className="text-center space-y-2">
+                <div className="w-16 h-16 bg-[#e89a9a]/10 text-[#e89a9a] rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <Settings size={32} />
+                </div>
+                <h2 className="text-2xl font-serif font-bold">Вход для мастера</h2>
+                <p className="text-xs text-slate-400">Введите секретный код доступа</p>
+              </div>
+
+              <div className="space-y-4">
+                <input 
+                  type="password" 
+                  placeholder="Код доступа"
+                  className="w-full p-5 rounded-2xl bg-slate-50 border-none focus:ring-4 focus:ring-[#e89a9a]/10 text-center text-xl tracking-[0.5em] font-bold"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
+                />
+                {error && <p className="text-rose-500 text-[10px] font-bold text-center uppercase tracking-widest">{error}</p>}
+                <div className="flex gap-3">
+                  <Button variant="secondary" className="flex-1" onClick={() => setShowAdminLogin(false)}>Отмена</Button>
+                  <Button className="flex-1" onClick={handleLogin}>Войти</Button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+function Reviews({ reviews, clientId, tgUser }: { reviews: Review[]; clientId: string; tgUser: any }) {
+  const [showForm, setShowForm] = useState(false);
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState('');
+
+  const handleSubmit = async () => {
+    if (!clientId) return;
+    await addDoc(collection(db, 'reviews'), {
+      clientId: clientId,
+      clientName: tgUser?.first_name || 'Клиент',
+      rating,
+      comment,
+      date: new Date().toISOString()
+    });
+    setShowForm(false);
+    setComment('');
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+      <SectionTitle 
+        title="Отзывы" 
+        subtitle="Мнение клиентов" 
+        action={
+          <Button variant="secondary" className="px-4 py-2 text-[10px] uppercase tracking-widest" onClick={() => setShowForm(true)}>
+            Написать
+          </Button>
+        }
+      />
+
+      <AnimatePresence>
+        {showForm && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }} 
+            animate={{ height: 'auto', opacity: 1 }} 
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <Card className="space-y-6 mb-8 bg-[#e89a9a]/5 border-[#e89a9a]/20">
+              <div className="flex justify-center gap-3">
+                {[1, 2, 3, 4, 5].map(i => (
+                  <motion.div key={i} whileTap={{ scale: 0.8 }}>
+                    <Star 
+                      size={36} 
+                      className={cn("cursor-pointer transition-all", i <= rating ? "fill-yellow-400 text-yellow-400 scale-110" : "text-slate-200")} 
+                      onClick={() => setRating(i)}
+                    />
+                  </motion.div>
+                ))}
+              </div>
+              <textarea
+                placeholder="Ваш отзыв очень важен для нас..."
+                className="w-full p-5 rounded-[24px] bg-white border border-[#f5f2ed] focus:outline-none focus:ring-4 focus:ring-[#e89a9a]/10 text-sm"
+                rows={4}
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+              />
+              <div className="flex gap-3">
+                <Button variant="secondary" className="flex-1" onClick={() => setShowForm(false)}>Отмена</Button>
+                <Button className="flex-1" onClick={handleSubmit}>Отправить</Button>
+              </div>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="space-y-6">
+        {reviews.map(review => (
+          <Card key={review.id} className="space-y-3">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-[#f5f2ed] rounded-full flex items-center justify-center text-[#e89a9a] font-bold">
+                  {review.clientName[0]}
+                </div>
+                <span className="font-bold text-sm">{review.clientName}</span>
+              </div>
+              <div className="flex gap-0.5">
+                {[...Array(5)].map((_, i) => (
+                  <Star key={i} size={12} className={cn(i < review.rating ? "fill-yellow-400 text-yellow-400" : "text-slate-200")} />
+                ))}
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 leading-relaxed italic">"{review.comment}"</p>
+            <div className="text-[10px] font-bold text-slate-300 uppercase tracking-widest text-right">
+              {format(parseISO(review.date), 'd MMMM yyyy', { locale: ru })}
+            </div>
+          </Card>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+// --- Master Management Views ---
+
+function ManageServices({ services }: { services: Service[] }) {
+  const [editing, setEditing] = useState<Partial<Service> | null>(null);
+
+  const handleSave = async () => {
+    if (!editing?.name || !editing?.price) return;
+    if (editing.id) {
+      await updateDoc(doc(db, 'services', editing.id), editing);
+    } else {
+      await addDoc(collection(db, 'services'), editing);
+    }
+    setEditing(null);
+  };
+
+  return (
+    <div className="space-y-8">
+      <SectionTitle title="Услуги" subtitle="Управление" action={
+        <Button variant="primary" className="p-3 rounded-full" onClick={() => setEditing({})}>
+          <Plus size={24} />
+        </Button>
+      } />
+
+      {editing && (
+        <Card className="space-y-4 border-[#e89a9a]/30">
+          <input placeholder="Название" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.name || ''} onChange={e => setEditing({...editing, name: e.target.value})} />
+          <textarea placeholder="Описание" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.description || ''} onChange={e => setEditing({...editing, description: e.target.value})} />
+          <div className="grid grid-cols-2 gap-3">
+            <input type="number" placeholder="Цена" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.price || ''} onChange={e => setEditing({...editing, price: Number(e.target.value)})} />
+            <input placeholder="Погрешность (+-)" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.priceRange || ''} onChange={e => setEditing({...editing, priceRange: e.target.value})} />
+          </div>
+          <input type="number" placeholder="Длительность (мин)" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.duration || ''} onChange={e => setEditing({...editing, duration: Number(e.target.value)})} />
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setEditing(null)}>Отмена</Button>
+            <Button className="flex-1" onClick={handleSave}>Сохранить</Button>
+          </div>
+        </Card>
+      )}
+
+      <div className="space-y-4">
+        {services.map(service => (
+          <Card key={service.id} className="flex justify-between items-center p-5">
+            <div>
+              <h3 className="font-bold text-lg">{service.name}</h3>
+              <p className="text-xs text-[#e89a9a] font-bold uppercase tracking-widest">{service.price} ₽ {service.priceRange}</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setEditing(service)} className="p-2 text-slate-300 hover:text-[#e89a9a] transition-colors"><Edit2 size={20} /></button>
+              <button onClick={() => deleteDoc(doc(db, 'services', service.id))} className="p-2 text-slate-300 hover:text-rose-500 transition-colors"><Trash2 size={20} /></button>
+            </div>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
 
-function ManageProfile({ masterInfo }: any) {
-  const [name, setName] = useState(masterInfo?.name || '');
-  const handleSave = async () => {
-    await setDoc(doc(db, 'masterInfo', 'main'), { name, bio: masterInfo?.bio || '', experience: masterInfo?.experience || '', photoUrl: masterInfo?.photoUrl || '' }, { merge: true });
-    alert('Сохранено!');
+function ManageAppointments({ appointments }: { appointments: Appointment[] }) {
+  const handleStatus = async (id: string, status: Appointment['status']) => {
+    await updateDoc(doc(db, 'appointments', id), { status });
   };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+      <SectionTitle title="Заявки" subtitle="Управление записями" />
+      
+      <div className="space-y-4">
+        {appointments.map(app => (
+          <Card key={app.id} className="space-y-4 border-l-4 border-[#e89a9a]">
+            <div className="flex justify-between items-start">
+              <div className="space-y-1">
+                <h3 className="font-bold text-lg">{app.clientName}</h3>
+                <div className="flex items-center gap-2 text-xs text-slate-400 font-bold uppercase tracking-widest">
+                  <Phone size={12} className="text-[#e89a9a]" />
+                  <span>{app.clientPhone || 'Нет телефона'}</span>
+                </div>
+              </div>
+              <Badge status={app.status} />
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl space-y-2">
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-400">Услуга:</span>
+                <span className="font-bold">{app.serviceName}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-400">Дата:</span>
+                <span className="font-bold">{app.date}</span>
+              </div>
+            </div>
+
+            {app.notes && (
+              <p className="text-xs text-slate-500 italic px-2">"{app.notes}"</p>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              {app.status === 'pending' && (
+                <>
+                  <Button className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600" onClick={() => handleStatus(app.id, 'confirmed')}>
+                    <CheckCircle2 size={16} /> Принять
+                  </Button>
+                  <Button className="flex-1 py-3 bg-rose-500 hover:bg-rose-600" onClick={() => handleStatus(app.id, 'rejected')}>
+                    <XCircle size={16} /> Отказать
+                  </Button>
+                </>
+              )}
+              {app.status !== 'pending' && (
+                <Button variant="outline" className="w-full py-3" onClick={() => handleStatus(app.id, 'pending')}>
+                  Вернуть в ожидание
+                </Button>
+              )}
+            </div>
+          </Card>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+function ManageProfile({ masterInfo }: { masterInfo: MasterInfo | null }) {
+  const [editing, setEditing] = useState<MasterInfo>(masterInfo || { name: '', bio: '', experience: '', photoUrl: '', phone: '', telegram: '' });
+
+  const handleSave = async () => {
+    await setDoc(doc(db, 'masterInfo', 'main'), editing);
+    alert('Профиль обновлен!');
+  };
+
   return (
     <div className="space-y-8">
-      <SectionTitle title="Профиль" subtitle="Мастер" backTo="/master" />
-      <Card className="space-y-4">
-        <input className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl" value={name} onChange={e => setName(e.target.value)} placeholder="Имя мастера" />
-        <Button className="w-full" onClick={handleSave}>Сохранить</Button>
+      <SectionTitle title="Профиль" subtitle="Информация о мастере" />
+      <Card className="space-y-6">
+        <div className="space-y-2">
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-2">Имя мастера</label>
+          <input className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.name} onChange={e => setEditing({...editing, name: e.target.value})} />
+        </div>
+        <div className="space-y-2">
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-2">Опыт работы</label>
+          <input className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.experience} onChange={e => setEditing({...editing, experience: e.target.value})} />
+        </div>
+        <div className="space-y-2">
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-2">Биография</label>
+          <textarea className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none h-32" value={editing.bio} onChange={e => setEditing({...editing, bio: e.target.value})} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-2">Телефон</label>
+            <input className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.phone || ''} onChange={e => setEditing({...editing, phone: e.target.value})} />
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-2">Telegram @</label>
+            <input className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.telegram || ''} onChange={e => setEditing({...editing, telegram: e.target.value})} />
+          </div>
+        </div>
+        <div className="space-y-2">
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-2">URL Фото</label>
+          <input className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.photoUrl} onChange={e => setEditing({...editing, photoUrl: e.target.value})} />
+        </div>
+        <Button className="w-full" onClick={handleSave}>Сохранить изменения</Button>
       </Card>
+      
+      <div className="grid grid-cols-2 gap-4">
+        <Link to="/master/news" className="block">
+          <Card className="text-center p-6 hover:bg-[#e89a9a]/5 transition-colors">
+            <Newspaper size={32} className="mx-auto mb-2 text-[#e89a9a]" />
+            <span className="text-xs font-bold uppercase tracking-widest">Новости</span>
+          </Card>
+        </Link>
+        <Link to="/master/portfolio" className="block">
+          <Card className="text-center p-6 hover:bg-[#e89a9a]/5 transition-colors">
+            <ImageIcon size={32} className="mx-auto mb-2 text-[#e89a9a]" />
+            <span className="text-xs font-bold uppercase tracking-widest">Портфолио</span>
+          </Card>
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function ManageNews({ news }: { news: News[] }) {
+  const [editing, setEditing] = useState<Partial<News> | null>(null);
+
+  const handleSave = async () => {
+    if (!editing?.title || !editing?.content) return;
+    const data = { ...editing, date: new Date().toISOString(), active: true };
+    if (editing.id) {
+      await updateDoc(doc(db, 'news', editing.id), data);
+    } else {
+      await addDoc(collection(db, 'news'), data);
+    }
+    setEditing(null);
+  };
+
+  return (
+    <div className="space-y-8">
+      <SectionTitle title="Новости" subtitle="Акции и события" action={
+        <Button variant="primary" className="p-3 rounded-full" onClick={() => setEditing({})}>
+          <Plus size={24} />
+        </Button>
+      } />
+
+      {editing && (
+        <Card className="space-y-4">
+          <input placeholder="Заголовок" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.title || ''} onChange={e => setEditing({...editing, title: e.target.value})} />
+          <textarea placeholder="Текст новости" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none h-32" value={editing.content || ''} onChange={e => setEditing({...editing, content: e.target.value})} />
+          <input placeholder="URL Картинки" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.imageUrl || ''} onChange={e => setEditing({...editing, imageUrl: e.target.value})} />
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setEditing(null)}>Отмена</Button>
+            <Button className="flex-1" onClick={handleSave}>Опубликовать</Button>
+          </div>
+        </Card>
+      )}
+
+      <div className="space-y-4">
+        {news.map(item => (
+          <Card key={item.id} className="flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              {item.imageUrl && <img src={item.imageUrl} className="w-12 h-12 rounded-xl object-cover" alt="" referrerPolicy="no-referrer" />}
+              <div>
+                <h3 className="font-bold">{item.title}</h3>
+                <p className="text-[10px] text-slate-400 uppercase tracking-widest">{format(parseISO(item.date), 'd MMM')}</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setEditing(item)} className="p-2 text-slate-300 hover:text-[#e89a9a]"><Edit2 size={18} /></button>
+              <button onClick={() => deleteDoc(doc(db, 'news', item.id))} className="p-2 text-slate-300 hover:text-rose-500"><Trash2 size={18} /></button>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ManagePortfolio({ portfolio }: { portfolio: Portfolio[] }) {
+  const [editing, setEditing] = useState<Partial<Portfolio> | null>(null);
+
+  const handleSave = async () => {
+    if (!editing?.imageUrl) return;
+    const data = { ...editing, date: new Date().toISOString() };
+    if (editing.id) {
+      await updateDoc(doc(db, 'portfolio', editing.id), data);
+    } else {
+      await addDoc(collection(db, 'portfolio'), data);
+    }
+    setEditing(null);
+  };
+
+  return (
+    <div className="space-y-8">
+      <SectionTitle title="Портфолио" subtitle="Галерея работ" action={
+        <Button variant="primary" className="p-3 rounded-full" onClick={() => setEditing({})}>
+          <Plus size={24} />
+        </Button>
+      } />
+
+      {editing && (
+        <Card className="space-y-4">
+          <input placeholder="URL Картинки" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.imageUrl || ''} onChange={e => setEditing({...editing, imageUrl: e.target.value})} />
+          <input placeholder="Название (необяз.)" className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.title || ''} onChange={e => setEditing({...editing, title: e.target.value})} />
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setEditing(null)}>Отмена</Button>
+            <Button className="flex-1" onClick={handleSave}>Добавить</Button>
+          </div>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-2 gap-4">
+        {portfolio.map(item => (
+          <div key={item.id} className="relative group">
+            <img src={item.imageUrl} className="w-full aspect-square object-cover rounded-[24px] shadow-sm" alt="" referrerPolicy="no-referrer" />
+            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button onClick={() => setEditing(item)} className="bg-white/90 p-2 rounded-full text-[#e89a9a] shadow-sm"><Edit2 size={14} /></button>
+              <button onClick={() => deleteDoc(doc(db, 'portfolio', item.id))} className="bg-white/90 p-2 rounded-full text-rose-500 shadow-sm"><Trash2 size={14} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -1,20 +1,28 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+@import "tailwindcss";
 
-:root {
-  --font-sans: "Inter", sans-serif;
-  --font-serif: "Playfair Display", serif;
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", ui-serif, Georgia, serif;
+  
+  --color-brand-primary: #e89a9a;
+  --color-brand-secondary: #f5f2ed;
+  --color-brand-dark: #2d2424;
+  --color-brand-bg: #fdfbf7;
 }
 
-body {
-  font-family: var(--font-sans);
-  background-color: #fdfbf7;
-}
+@layer base {
+  body {
+    @apply bg-brand-bg text-brand-dark antialiased selection:bg-brand-primary/20;
+  }
+  
+  h1, h2, h3, h4 {
+    @apply font-serif tracking-tight;
+  }
 
-.font-serif {
-  font-family: var(--font-serif);
+  a {
+    @apply no-underline;
+  }
 }
 
 .no-scrollbar::-webkit-scrollbar {

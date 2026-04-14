@@ -248,8 +248,10 @@ export default function App() {
       setReviews(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Review)));
     });
 
-    const unsubNews = onSnapshot(query(collection(db, 'news'), where('active', '==', true), orderBy('date', 'desc')), (snapshot) => {
-      setNews(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as News)));
+    const unsubNews = onSnapshot(query(collection(db, 'news'), where('active', '==', true)), (snapshot) => {
+      const newsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as News));
+      newsData.sort((a, b) => b.date.localeCompare(a.date));
+      setNews(newsData);
     });
 
     const unsubPortfolio = onSnapshot(query(collection(db, 'portfolio'), orderBy('date', 'desc'), limit(8)), (snapshot) => {
@@ -272,7 +274,7 @@ export default function App() {
 
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       setUser(user);
-      if (user?.email === 'lolkapulya@gmail.com') {
+      if (user?.email === 'egor0info1@gmail.com') {
         setIsAdmin(true);
         localStorage.setItem('master_mode', 'true');
       }
@@ -295,10 +297,17 @@ export default function App() {
     if (clientId) {
       const q = isAdmin 
         ? query(collection(db, 'appointments'), orderBy('date', 'desc'))
-        : query(collection(db, 'appointments'), where('clientId', '==', clientId), orderBy('date', 'desc'));
+        : query(collection(db, 'appointments'), where('clientId', '==', clientId));
       
       const unsubAppointments = onSnapshot(q, (snapshot) => {
-        setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Appointment)));
+        let apps = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Appointment));
+        if (!isAdmin) {
+          // Sort in memory for clients to avoid needing a composite index
+          apps.sort((a, b) => b.date.localeCompare(a.date));
+        }
+        setAppointments(apps);
+      }, (error) => {
+        console.error("Appointments listener error:", error);
       });
       return () => unsubAppointments();
     }

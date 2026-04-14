@@ -244,7 +244,7 @@ export default function App() {
       if (doc.exists()) setMasterInfo(doc.data() as MasterInfo);
     });
 
-    const unsubReviews = onSnapshot(query(collection(db, 'reviews'), orderBy('date', 'desc'), limit(10)), (snapshot) => {
+    const unsubReviews = onSnapshot(query(collection(db, 'reviews'), orderBy('date', 'desc'), limit(50)), (snapshot) => {
       setReviews(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Review)));
     });
 
@@ -254,7 +254,7 @@ export default function App() {
       setNews(newsData);
     });
 
-    const unsubPortfolio = onSnapshot(query(collection(db, 'portfolio'), orderBy('date', 'desc'), limit(8)), (snapshot) => {
+    const unsubPortfolio = onSnapshot(query(collection(db, 'portfolio'), orderBy('date', 'desc'), limit(50)), (snapshot) => {
       setPortfolio(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Portfolio)));
     });
 
@@ -1650,6 +1650,10 @@ function ManagePortfolio({ portfolio }: { portfolio: Portfolio[] }) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 800 * 1024) { // 800KB limit for safety (Firestore doc limit is 1MB)
+        alert("Фото слишком большое! Пожалуйста, выберите файл меньше 800 КБ.");
+        return;
+      }
       setUploading(true);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -1662,13 +1666,18 @@ function ManagePortfolio({ portfolio }: { portfolio: Portfolio[] }) {
 
   const handleSave = async () => {
     if (!editing?.imageUrl) return;
-    const data = { ...editing, date: new Date().toISOString() };
-    if (editing.id) {
-      await updateDoc(doc(db, 'portfolio', editing.id), data);
-    } else {
-      await addDoc(collection(db, 'portfolio'), data);
+    try {
+      const data = { ...editing, date: new Date().toISOString() };
+      if (editing.id) {
+        await updateDoc(doc(db, 'portfolio', editing.id), data);
+      } else {
+        await addDoc(collection(db, 'portfolio'), data);
+      }
+      setEditing(null);
+    } catch (e) {
+      console.error("Portfolio save error:", e);
+      alert("Ошибка при сохранении. Возможно, файл слишком большой.");
     }
-    setEditing(null);
   };
 
   return (

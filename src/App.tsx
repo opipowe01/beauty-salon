@@ -176,7 +176,7 @@ function Profile({ isAdmin, setIsAdmin }: any) {
   );
 }
 
-// --- Master Components ---
+// --- Master Management ---
 
 function ManageSchedule({ blockedDates }: any) {
   const toggleDate = async (dateStr: string) => {
@@ -251,9 +251,6 @@ function ManageReviews({ reviews }: any) {
     </div>
   );
 }
-
-// --- Other components (ManageAppointments, ManageServices, etc.) remain similar to previous versions ---
-// [Код ManageAppointments, ManageServices, ManagePortfolio, ManageInfo из предыдущего ответа]
 
 function ManageAppointments({ appointments }: any) {
   const updateStatus = async (id: string, status: string, app: any) => {

@@ -96,6 +96,7 @@ interface MasterInfo {
   photoUrl: string;
   phone?: string;
   telegram?: string;
+  address?: string;
 }
 
 interface News {
@@ -393,7 +394,7 @@ export default function App() {
         </div>
 
         {/* Bottom Navigation */}
-        <nav className="fixed bottom-6 left-5 right-5 h-20 bg-white/95 backdrop-blur-xl rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-white/50 px-8 flex justify-between items-center z-50">
+        <nav className="fixed bottom-6 left-3 right-3 h-20 bg-white/95 backdrop-blur-xl rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-white/50 px-4 flex justify-between items-center z-50">
           <NavLink to="/" icon={<Home size={22} />} label="Главная" />
           <NavLink to="/services" icon={<ClipboardList size={22} />} label="Прайс" />
           <NavLink to="/book" icon={<Plus size={28} className="text-white" />} label="Запись" isFab />
@@ -428,7 +429,7 @@ function NavLink({ to, icon, label, isFab }: { to: string; icon: React.ReactNode
       <div className={cn("transition-transform duration-300", isActive && "scale-110")}>
         {icon}
       </div>
-      <span className={cn("text-[9px] font-bold uppercase tracking-[0.15em] transition-opacity", isActive ? "opacity-100" : "opacity-60")}>{label}</span>
+      <span className={cn("text-[8px] font-bold uppercase tracking-[0.1em] transition-opacity", isActive ? "opacity-100" : "opacity-60")}>{label}</span>
     </Link>
   );
 }
@@ -1524,7 +1525,7 @@ function ManageAppointments({ appointments }: { appointments: Appointment[] }) {
 }
 
 function ManageProfile({ masterInfo }: { masterInfo: MasterInfo | null }) {
-  const [editing, setEditing] = useState<MasterInfo>(masterInfo || { name: '', bio: '', experience: '', photoUrl: '', phone: '', telegram: '' });
+  const [editing, setEditing] = useState<MasterInfo>(masterInfo || { name: '', bio: '', experience: '', photoUrl: '', phone: '', telegram: '', address: '' });
 
   const handleSave = async () => {
     await setDoc(doc(db, 'masterInfo', 'main'), editing);
@@ -1542,6 +1543,10 @@ function ManageProfile({ masterInfo }: { masterInfo: MasterInfo | null }) {
         <div className="space-y-2">
           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-2">Опыт работы</label>
           <input className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.experience} onChange={e => setEditing({...editing, experience: e.target.value})} />
+        </div>
+        <div className="space-y-2">
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-2">Адрес салона</label>
+          <input className="w-full p-4 bg-[#f5f2ed]/50 rounded-2xl focus:outline-none" value={editing.address || ''} onChange={e => setEditing({...editing, address: e.target.value})} placeholder="Напр. ул. Пушкина, 10" />
         </div>
         <div className="space-y-2">
           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-2">Биография</label>

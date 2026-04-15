@@ -201,7 +201,8 @@ if (bot) {
         await bot.telegram.sendMessage(clientChatId, `✅ *Ваша запись подтверждена!*\n\n💇‍♀️ ${appData.serviceName}\n📅 ${appData.date}`, { parse_mode: 'Markdown' });
       }
 
-      await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n✅ *Одобрено*', { parse_mode: 'Markdown' });
+      const messageText = (ctx.callbackQuery?.message && 'text' in ctx.callbackQuery.message) ? ctx.callbackQuery.message.text : '';
+      await ctx.editMessageText(messageText + '\n\n✅ *Одобрено*', { parse_mode: 'Markdown' });
       ctx.answerCbQuery('Запись подтверждена!');
     } catch (e) {
       console.error('Confirm Action Error:', e);
@@ -225,7 +226,8 @@ if (bot) {
         await bot.telegram.sendMessage(clientChatId, `😔 *К сожалению, мастер отклонил запись.*\n\n📅 ${appData.date}\nПожалуйста, выберите другое время.`, { parse_mode: 'Markdown' });
       }
 
-      await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n❌ *Отклонено*', { parse_mode: 'Markdown' });
+      const messageText = (ctx.callbackQuery?.message && 'text' in ctx.callbackQuery.message) ? ctx.callbackQuery.message.text : '';
+      await ctx.editMessageText(messageText + '\n\n❌ *Отклонено*', { parse_mode: 'Markdown' });
       ctx.answerCbQuery('Запись отклонена.');
     } catch (e) {
       console.error('Reject Action Error:', e);
@@ -262,8 +264,9 @@ if (bot) {
         `🌸 *О мастере*\n\n` +
         `👤 *Имя:* ${data?.name || 'Маргарита'}\n` +
         `✨ *Опыт:* ${data?.experience || '5 лет'}\n` +
+        `📍 *Адрес:* ${data?.address || 'Не указан'}\n` +
         `📝 *О себе:* ${data?.bio || 'Профессиональный мастер красоты'}\n\n` +
-        `📍 Мы ждем вас!`,
+        `Мы ждем вас!`,
         { parse_mode: 'Markdown' }
       );
     } catch (e) {

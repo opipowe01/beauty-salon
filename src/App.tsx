@@ -470,7 +470,7 @@ function ClientHome({ masterInfo, news, portfolio, reviews }: { masterInfo: Mast
         </motion.div>
 
         <div className="space-y-3">
-          <h1 className="text-5xl font-serif font-bold text-brand-dark tracking-tight">
+          <h1 className="text-4xl font-sans font-medium text-brand-dark/70 tracking-tight">
             {masterInfo?.name || "Маргарита"}
           </h1>
           <div className="inline-flex items-center px-5 py-2 bg-brand-primary/10 rounded-full">
@@ -484,7 +484,7 @@ function ClientHome({ masterInfo, news, portfolio, reviews }: { masterInfo: Mast
       {/* Quick Action */}
       <div className="px-2">
         <Link to="/book" className="block no-underline">
-          <Button className="w-full py-7 text-xl shadow-[0_25px_50px_rgba(232,154,154,0.35)] rounded-[24px]">
+          <Button className="w-full py-5 text-lg shadow-[0_20px_40px_rgba(232,154,154,0.30)] rounded-[24px]">
             Записаться онлайн
           </Button>
         </Link>
@@ -496,8 +496,8 @@ function ClientHome({ masterInfo, news, portfolio, reviews }: { masterInfo: Mast
           <div className="absolute -top-10 -right-10 p-4 opacity-[0.03] text-brand-dark">
             <Info size={160} />
           </div>
-          <p className="text-brand-dark/80 leading-relaxed text-xl font-serif italic relative z-10">
-            "{masterInfo?.bio || "Добро пожаловать в мой уютный салон! Я специализируюсь на современных техниках окрашивания и стрижках. Моя цель — подчеркнуть вашу естественную красоту."}"
+          <p className="text-[#7a746d] leading-relaxed text-lg font-sans relative z-10">
+            {masterInfo?.bio || "Добро пожаловать в мой уютный салон! Я специализируюсь на современных техниках окрашивания и стрижках. Моя цель — подчеркнуть вашу естественную красоту."}
           </p>
         </div>
       </section>
